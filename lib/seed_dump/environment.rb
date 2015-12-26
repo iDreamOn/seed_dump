@@ -1,6 +1,14 @@
 class SeedDump
   module Environment
 
+    def add_parent(models, reorder, model)
+      model.reflect_on_all_associations(:belongs_to).each do |parent|
+        key = parent.name.to_s.strip.underscore.singularize.camelize.constantize
+        add_parent(models, reorder, models[models.index(key)]) unless reorder.has_key?(key)
+      end
+      reorder[model.name] = model
+    end
+
     def dump_using_environment(env = {})
       Rails.application.eager_load!
 
@@ -11,12 +19,43 @@ class SeedDump
                else
                  ActiveRecord::Base.descendants
                end
+      
+      reorder = {}
 
-      models = models.select do |model|
-                 (model.to_s != 'ActiveRecord::SchemaMigration') && \
-                  model.table_exists? && \
-                  model.exists?
-               end
+      models.select do |model| 
+        if (model.to_s != 'ActiveRecord::SchemaMigration') && 
+          model.table_exists? && 
+          model.exists? && 
+          !model.reflect_on_all_associations(:belongs_to).any? 
+          reorder[model.name] = model
+          models.delete(model.name)
+        end
+      end
+
+      models.select do |model| 
+        if (model.to_s != 'ActiveRecord::SchemaMigration') && 
+            model.table_exists? && 
+            model.exists? && 
+            model.reflect_on_all_associations(:belongs_to).any? &&
+            !model.name.to_s.start_with?('HABTM_')
+            model.reflect_on_all_associations(:belongs_to).each do |parent|
+              add_parent(models, reorder, model)
+         end
+            reorder[model.name] = model
+            models.delete(model.name)
+         end
+      end
+
+      models.select do |model|
+        if (model.to_s != 'ActiveRecord::SchemaMigration') &&
+          model.table_exists? &&
+          model.exists?
+          reorder[model.name] = model
+          models.delete(model.name)
+        end
+      end
+
+      models = reorder.values
 
       append = (env['APPEND'] == 'true')
 
@@ -40,5 +79,7 @@ class SeedDump
         append = true
       end
     end
+
+    
   end
 end
